@@ -355,38 +355,49 @@ func cmdClean(args []string) {
 			local = append(local, b)
 		}
 	}
-	if len(local) == 0 {
-		return
+
+	if len(local) > 0 {
+		out, err = exec.Command("gh", "pr", "list", "--state", "merged", "--json", "headRefName", "--limit", "1000").Output()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "flow: gh pr list: %v\n", err)
+			os.Exit(1)
+		}
+		var prs []struct {
+			HeadRefName string `json:"headRefName"`
+		}
+		if err := json.Unmarshal(out, &prs); err != nil {
+			fmt.Fprintf(os.Stderr, "flow: parsing gh output: %v\n", err)
+			os.Exit(1)
+		}
+		merged := make(map[string]bool, len(prs))
+		for _, pr := range prs {
+			merged[pr.HeadRefName] = true
+		}
+
+		for _, b := range local {
+			if !merged[b] {
+				continue
+			}
+			if b == cur {
+				run("git", "checkout", def)
+			}
+			run("git", "branch", "-D", b)
+			// Also drop the local origin/<branch> remote-tracking ref. This does
+			// not touch the remote.
+			run("git", "branch", "-D", "-r", "origin/"+b)
+		}
 	}
 
-	out, err = exec.Command("gh", "pr", "list", "--state", "merged", "--json", "headRefName", "--limit", "1000").Output()
+	// If cleanup left us on the default branch — because we started there, or
+	// because the branch we were on got deleted — bring it up to date.
+	cur, err = currentBranch()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "flow: gh pr list: %v\n", err)
+		fmt.Fprintf(os.Stderr, "flow: %v\n", err)
 		os.Exit(1)
 	}
-	var prs []struct {
-		HeadRefName string `json:"headRefName"`
-	}
-	if err := json.Unmarshal(out, &prs); err != nil {
-		fmt.Fprintf(os.Stderr, "flow: parsing gh output: %v\n", err)
-		os.Exit(1)
-	}
-	merged := make(map[string]bool, len(prs))
-	for _, pr := range prs {
-		merged[pr.HeadRefName] = true
-	}
-
-	for _, b := range local {
-		if !merged[b] {
-			continue
-		}
-		if b == cur {
-			run("git", "checkout", def)
-		}
-		run("git", "branch", "-D", b)
-		// Also drop the local origin/<branch> remote-tracking ref. This does
-		// not touch the remote.
-		run("git", "branch", "-D", "-r", "origin/"+b)
+	if cur == def {
+		run("git", "fetch", "origin", def)
+		run("git", "rebase", "origin/"+def)
 	}
 }
 
