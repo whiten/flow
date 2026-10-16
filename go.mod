@@ -1,4 +1,4 @@
-module flow
+module github.com/whiten/flow
 
 go 1.22
 
